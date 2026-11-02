@@ -26,7 +26,7 @@ export const TimelineScrubber: React.FC<TimelineScrubberProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Slider Bar */}
+      {/* Compact Slider Bar */}
       <View style={styles.sliderContainer}>
         <Slider
           style={styles.slider}
@@ -60,26 +60,26 @@ const styles = StyleSheet.create({
   container: {
     width: '100%',
     paddingHorizontal: SPACING.md,
-    paddingVertical: SPACING.xs,
+    paddingVertical: 0,
   },
   sliderContainer: {
     width: '100%',
-    height: 36,
+    height: 24,
     justifyContent: 'center',
   },
   slider: {
     width: '100%',
-    height: 40,
+    height: 28,
   },
   timeRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingHorizontal: SPACING.xs,
-    marginTop: -4,
+    marginTop: -2,
   },
   timeText: {
     color: '#FFFFFF',
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
     fontVariant: ['tabular-nums'],
   },
@@ -89,7 +89,7 @@ const styles = StyleSheet.create({
   },
   timeTextMuted: {
     color: COLORS.textMuted,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
     fontVariant: ['tabular-nums'],
   },

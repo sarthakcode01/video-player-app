@@ -101,6 +101,8 @@ export function useVideoPlayerController({ initialDuration = 0 }: UseVideoPlayer
   const isScrubbingRef = useRef<boolean>(false);
   // Position (seconds) to restore once VLC has loaded after an engine switch
   const pendingVlcSeekRef = useRef<number | null>(null);
+  // Records the reason for switching to VLC (e.g. missing hardware EAC3 decoder)
+  const switchReasonRef = useRef<string | null>(null);
 
   // Anti-jitter scrubber states
   const [isScrubbing, setIsScrubbing] = useState<boolean>(false);
@@ -350,11 +352,16 @@ export function useVideoPlayerController({ initialDuration = 0 }: UseVideoPlayer
   );
 
   // Hand the file over to libVLC (software decoders for Dolby AC3/EAC3/DDP, DTS, TrueHD, HEVC 10-bit).
-  // Only attempted once per file; if VLC also fails, onVlcError shows the error screen.
+  // Only attempted once per file; if VLC also fails, onVlcError smoothly falls back to ExoPlayer subtitle mode.
   const switchToVlc = useCallback((reason: string) => {
     if (hasAttemptedAudioFallbackRef.current) return false;
     hasAttemptedAudioFallbackRef.current = true;
-    console.warn(`${reason} Switching to VLC software decoding.`);
+    switchReasonRef.current = reason;
+    console.log('====================================================');
+    console.log(`[DIAGNOSTIC][SWITCH_TO_VLC] Handover to VLC triggered:`);
+    console.log(`  Reason: ${reason}`);
+    console.log(`  Current position: ${currentTimeRef.current}s / Duration: ${durationRef.current}s`);
+    console.log('====================================================');
     pendingVlcSeekRef.current = currentTimeRef.current > 1 ? currentTimeRef.current : null;
     setEngine('vlc');
     // Exo track indexes do not match VLC track ids; onVlcLoad repopulates them
@@ -364,7 +371,6 @@ export function useVideoPlayerController({ initialDuration = 0 }: UseVideoPlayer
     setSelectedTextTrackIndex(null);
     setIsAudioMutedFallback(false);
     setPlayerError(null);
-    setDiagnostic(null);
     setIsBuffering(true);
     setIsPlaying(true);
     return true;
@@ -375,7 +381,20 @@ export function useVideoPlayerController({ initialDuration = 0 }: UseVideoPlayer
     setIsBuffering(false);
     setPlayerError(null);
     setDiagnostic(null);
-    hasAttemptedAudioFallbackRef.current = false;
+
+    console.log('====================================================');
+    console.log('[DIAGNOSTIC][EXO:ON_LOAD] ExoPlayer successfully loaded file:');
+    console.log('  Duration:', data.duration, 'sec');
+    console.log('  Audio Tracks Count:', data.audioTracks?.length || 0);
+    data.audioTracks?.forEach((t, i) => {
+      console.log(`    [Audio #${i}] index=${t.index}, title="${t.title}", lang="${t.language}", type="${t.type}", selected=${t.selected}`);
+    });
+    console.log('  Text Tracks Count:', data.textTracks?.length || 0);
+    data.textTracks?.forEach((t, i) => {
+      console.log(`    [Subtitle #${i}] index=${t.index}, title="${t.title}", lang="${t.language}", type="${t.type}", selected=${t.selected}`);
+    });
+    console.log('====================================================');
+
     if (data.duration && data.duration > 0) {
       setDuration(data.duration);
     }
@@ -392,9 +411,13 @@ export function useVideoPlayerController({ initialDuration = 0 }: UseVideoPlayer
       // Digital Plus / DDP5.1): it silently plays video only and leaves every audio track unselected.
       if (parsedAudio.length > 0 && !parsedAudio.some((t) => t.selected)) {
         const codecs = Array.from(new Set(parsedAudio.map((t) => t.type).filter(Boolean))).join(', ');
-        if (switchToVlc(`No playable audio track (${codecs || 'unknown codec'}).`)) {
-          setAudioNotice('Audio format not supported by phone hardware. Playing with software decoding.');
-          return;
+        console.warn(`[DIAGNOSTIC][EXO] No audio track could be selected by hardware decoder: ${codecs}`);
+        switchReasonRef.current = `No hardware audio decoder (${codecs || 'codec'}).`;
+        if (!hasAttemptedAudioFallbackRef.current && !isAudioMutedFallback) {
+          if (switchToVlc(`No playable audio track (${codecs || 'unknown codec'}).`)) {
+            setAudioNotice('Audio format not supported by phone hardware. Switching to software decoding.');
+            return;
+          }
         }
       }
 
@@ -473,6 +496,15 @@ export function useVideoPlayerController({ initialDuration = 0 }: UseVideoPlayer
     const parsed = parseExoPlayerError(error);
     setDiagnostic(parsed);
 
+    console.error('====================================================');
+    console.error('[DIAGNOSTIC][EXO:ON_ERROR] ExoPlayer native playback error:');
+    console.error('  Error message:', error?.message || error?.error?.errorString || 'unknown');
+    console.error('  Parsed category:', parsed.failedCategory);
+    console.error('  Detected codec:', parsed.detectedCodec || 'none');
+    console.error('  Is decoder init failed:', parsed.isDecoderInitFailed);
+    console.error('  Raw error object:', JSON.stringify(error));
+    console.error('====================================================');
+
     // Any playback failure (not only decoder init) gets one try with VLC before showing an error
     if (switchToVlc(`Hardware playback failed (${parsed.detectedCodec ?? 'unknown'}).`)) {
       setAudioNotice(
@@ -487,8 +519,27 @@ export function useVideoPlayerController({ initialDuration = 0 }: UseVideoPlayer
   // ---- libVLC (software decoding) event handlers. VLC reports times in milliseconds. ----
   const onVlcLoad = useCallback((info: VideoInfo) => {
     setPlayerError(null);
+    console.log('====================================================');
+    console.log('[DIAGNOSTIC][VLC:ON_LOAD] VLC Player native load success:');
+    console.log('  Duration (ms):', info.duration);
+    console.log('  Audio Tracks Count:', info.audioTracks?.length || 0);
+    info.audioTracks?.forEach((t, i) => {
+      console.log(`    [VLC Audio #${i}] id=${t.id}, name="${t.name}"`);
+    });
+    console.log('  Text Tracks Count:', info.textTracks?.length || 0);
+    info.textTracks?.forEach((t, i) => {
+      console.log(`    [VLC Subtitle #${i}] id=${t.id}, name="${t.name}"`);
+    });
+    console.log('====================================================');
+
     if (info.duration && info.duration > 0) {
-      setDuration(info.duration / 1000);
+      const durationSec = info.duration / 1000;
+      setDuration(durationSec);
+      durationRef.current = durationSec;
+      setAudioNotice('Playing with software audio decoding (VLC).');
+      setTimeout(() => {
+        setAudioNotice((prev) => (prev?.includes('software audio decoding') ? null : prev));
+      }, 4000);
     }
 
     if (Array.isArray(info.audioTracks)) {
@@ -538,18 +589,45 @@ export function useVideoPlayerController({ initialDuration = 0 }: UseVideoPlayer
 
   // bufferRate is sent by the native side but missing from the library's typings
   const onVlcBuffering = useCallback((event: { target: number; bufferRate?: number }) => {
+    console.log(`[DIAGNOSTIC][VLC:BUFFERING] bufferRate=${event?.bufferRate} target=${event?.target}`);
     // VLC emits Buffering events continuously; only show the spinner until the buffer fills
     setIsBuffering(typeof event?.bufferRate === 'number' ? event.bufferRate < 100 : false);
   }, []);
 
   const onVlcPlaying = useCallback(() => {
+    console.log('====================================================');
+    console.log('[DIAGNOSTIC][VLC:PLAYING] >>> VLC actively started playback! <<<');
+    console.log('====================================================');
     setIsBuffering(false);
   }, []);
 
-  const onVlcError = useCallback(() => {
+  const onVlcError = useCallback((event?: any) => {
     setIsBuffering(false);
-    setPlayerError('This file could not be decoded, even with software decoding. The file may be corrupted or use an unsupported container.');
-  }, []);
+    console.error('====================================================');
+    console.error('[DIAGNOSTIC][VLC:ON_ERROR] VLC native playback error:');
+    console.error('  Raw error argument:', JSON.stringify(event));
+    console.error('  Switch reason:', switchReasonRef.current);
+    console.error('  Current Diagnostic state:', JSON.stringify(diagnostic));
+    console.error('====================================================');
+    // If the handover to VLC was because of unsupported hardware audio or diagnostic indicates audio failure:
+    // Seamlessly fall back to ExoPlayer with audio muted and subtitles on so video is NEVER blocked!
+    if (
+      switchReasonRef.current ||
+      diagnostic?.failedCategory === 'audio' ||
+      diagnostic?.isDecoderInitFailed
+    ) {
+      console.warn('[DIAGNOSTIC][VLC] Software audio decoding unavailable or file unreadable by VLC. Gracefully falling back to ExoPlayer in subtitle mode.');
+      setIsAudioMutedFallback(true);
+      setEngine('exo');
+      setAudioNotice('Dolby EAC3 audio format not supported by phone. Playing video with subtitles.');
+      setPlayerError(null);
+      setIsBuffering(false);
+      setIsPlaying(true);
+      setPlayerKey((k) => k + 1);
+      return;
+    }
+    setPlayerError('This file could not be decoded. The file may be corrupted or use an unsupported container.');
+  }, [diagnostic]);
 
   // Watch video-only (mutes/disables failing audio stream so video plays smoothly with subtitles)
   const playWithoutAudio = useCallback(() => {
@@ -607,6 +685,7 @@ export function useVideoPlayerController({ initialDuration = 0 }: UseVideoPlayer
     holdSide,
     // Aspect ratio
     aspectMode,
+    setAspectMode,
     cycleAspectMode,
     // Double tap seeking
     doubleTapSide,

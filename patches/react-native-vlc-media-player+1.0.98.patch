@@ -1,0 +1,70 @@
+diff --git a/node_modules/react-native-vlc-media-player/android/src/main/java/com/yuanzhou/vlc/vlcplayer/ReactVlcPlayerView.java b/node_modules/react-native-vlc-media-player/android/src/main/java/com/yuanzhou/vlc/vlcplayer/ReactVlcPlayerView.java
+index 8c7acdf..d7d1758 100644
+--- a/node_modules/react-native-vlc-media-player/android/src/main/java/com/yuanzhou/vlc/vlcplayer/ReactVlcPlayerView.java
++++ b/node_modules/react-native-vlc-media-player/android/src/main/java/com/yuanzhou/vlc/vlcplayer/ReactVlcPlayerView.java
+@@ -6,6 +6,7 @@ import android.graphics.Bitmap;
+ import android.graphics.SurfaceTexture;
+ import android.media.AudioManager;
+ import android.net.Uri;
++import android.os.ParcelFileDescriptor;
+ import android.os.Handler;
+ import android.os.Looper;
+ import android.util.DisplayMetrics;
+@@ -78,6 +79,7 @@ class ReactVlcPlayerView extends TextureView implements
+ 
+     private WritableMap mVideoInfo = null;
+     private String mVideoInfoHash = null;
++    private ParcelFileDescriptor mParcelFileDescriptor = null;
+ 
+ 
+     public ReactVlcPlayerView(ThemedReactContext context) {
+@@ -422,11 +424,31 @@ class ReactVlcPlayerView extends TextureView implements
+             }
+             DisplayMetrics dm = getResources().getDisplayMetrics();
+             Media m = null;
+-            if (isNetwork) {
+-                Uri uri = Uri.parse(uriString);
+-                m = new Media(libvlc, uri);
+-            } else {
+-                m = new Media(libvlc, uriString);
++            if (mParcelFileDescriptor != null) {
++                try {
++                    mParcelFileDescriptor.close();
++                } catch (Exception ignored) {}
++                mParcelFileDescriptor = null;
++            }
++            if (uriString != null && uriString.startsWith("content://")) {
++                try {
++                    Uri contentUri = Uri.parse(uriString);
++                    mParcelFileDescriptor = getContext().getContentResolver().openFileDescriptor(contentUri, "r");
++                    if (mParcelFileDescriptor != null) {
++                        m = new Media(libvlc, mParcelFileDescriptor.getFileDescriptor());
++                        Log.i(TAG, "Opened content URI via ParcelFileDescriptor: " + uriString);
++                    }
++                } catch (Exception e) {
++                    Log.e(TAG, "Error opening ParcelFileDescriptor for: " + uriString, e);
++                }
++            }
++            if (m == null) {
++                if (isNetwork) {
++                    Uri uri = Uri.parse(uriString);
++                    m = new Media(libvlc, uri);
++                } else {
++                    m = new Media(libvlc, uriString);
++                }
+             }
+             m.setEventListener(mMediaListener);
+             if (hwDecoderEnabled != null && hwDecoderForced != null) {
+@@ -488,6 +510,12 @@ class ReactVlcPlayerView extends TextureView implements
+     }
+ 
+     private void releasePlayer() {
++        if (mParcelFileDescriptor != null) {
++            try {
++                mParcelFileDescriptor.close();
++            } catch (Exception ignored) {}
++            mParcelFileDescriptor = null;
++        }
+         if (libvlc == null)
+             return;
+ 

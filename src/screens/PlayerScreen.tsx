@@ -23,6 +23,7 @@ import { HoldSpeedIndicator } from '../components/player/HoldSpeedIndicator';
 import { GestureOverlay } from '../components/player/GestureOverlay';
 import { TrackSelectorModal } from '../components/player/TrackSelectorModal';
 import { PlayerErrorFallback } from '../components/player/PlayerErrorFallback';
+import { openInExternalPlayer } from '../utils/externalPlayer';
 import { COLORS, SPEED_PRESETS, SPACING } from '../constants/theme';
 import { formatDuration } from '../utils/formatters';
 import { savePlaybackPosition, getPlaybackPosition } from '../utils/watchHistory';
@@ -74,6 +75,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
     setHoldSpeed,
     holdSide,
     aspectMode,
+    setAspectMode,
     cycleAspectMode,
     doubleTapSide,
     accumulatedSeek,
@@ -93,6 +95,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
     showControls,
     toggleControls,
     togglePlayPause,
+    pause,
     seekTo,
     seekRelative,
     playerError,
@@ -118,6 +121,23 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => setToast(null), 1200);
   }, []);
+  // Diagnostic logging for video asset and engine state
+  useEffect(() => {
+    console.log('====================================================');
+    console.log('[DIAGNOSTIC][PLAYER_SCREEN:MOUNT] Selected Video:');
+    console.log('  ID:', asset.id);
+    console.log('  Filename:', asset.filename);
+    console.log('  Duration:', asset.duration, 'sec');
+    console.log('  URI:', asset.uri);
+    console.log('  Album:', asset.albumTitle);
+    console.log('  Platform:', Platform.OS, Platform.Version);
+    console.log('====================================================');
+  }, [asset]);
+
+  useEffect(() => {
+    console.log(`[DIAGNOSTIC][ENGINE_STATE] Active Engine: ${engine.toUpperCase()} (playerKey: ${playerKey})`);
+  }, [engine, playerKey]);
+
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
@@ -138,6 +158,15 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
     await toggleLock();
     showToast(willLock ? 'Orientation locked' : 'Auto-rotate on');
   }, [isLocked, toggleLock, showToast]);
+
+  // Two-finger pinch to snap between original ratio (fit) and edge-to-edge (zoom)
+  const handlePinchSnap = useCallback(
+    (mode: 'zoom' | 'fit') => {
+      setAspectMode(mode);
+      showToast(mode === 'zoom' ? 'Zoomed to fill' : 'Original (Fit)');
+    },
+    [setAspectMode, showToast]
+  );
 
   // Video box: Fit/Stretch/Zoom fill the screen (resizeMode does the work); 16:9 and 4:3
   // are a centered box with that exact ratio, with the video stretched to fill it.
@@ -234,6 +263,26 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
     setResumePromptPosition(null);
   };
 
+  // Resolve MediaStore Content URI on Android so LibVLC can bypass Scoped Storage
+  const vlcSourceUri = useMemo(() => {
+    if (Platform.OS === 'android') {
+      if (asset.uri?.startsWith('content://')) {
+        return asset.uri;
+      }
+      if (asset.id && /^\d+$/.test(String(asset.id))) {
+        const contentUri = `content://media/external/video/media/${asset.id}`;
+        console.log('[DIAGNOSTIC][VLC_SOURCE_URI] Resolved MediaStore Content URI for VLC:', contentUri);
+        return contentUri;
+      }
+    }
+    return asset.uri;
+  }, [asset.id, asset.uri]);
+
+  const handleOpenExternalPlayer = useCallback(async () => {
+    pause();
+    await openInExternalPlayer(asset.uri, asset.id);
+  }, [asset.uri, asset.id, pause]);
+
   return (
     <View style={styles.container}>
       {/* Notch-safe edge-to-edge status bar configuration */}
@@ -244,12 +293,13 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
         translucent={true}
       />
 
-      {/* Gesture Overlay managing Single-Tap, Zone Double-Taps, and Hold-to-2x */}
+      {/* Gesture Overlay managing Single-Tap, Zone Double-Taps, Pinch-to-Zoom, and Hold-to-2x */}
       <GestureOverlay
         onSingleTap={toggleControls}
         onDoubleTapSeek={handleDoubleTapSeek}
         onHoldStart={onHoldStart}
         onHoldEnd={onHoldEnd}
+        onPinchSnap={handlePinchSnap}
       >
         <View style={styles.videoStage} onLayout={handleContainerLayout} pointerEvents="none">
         <View style={videoBoxStyle}>
@@ -258,7 +308,13 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
           <VLCPlayer
             key={`vlc-${playerKey}`}
             ref={vlcRef}
-            source={{ uri: asset.uri }}
+            source={{
+              uri: vlcSourceUri,
+              isNetwork: true,
+              autoplay: true,
+              hwDecoderEnabled: 0,
+              hwDecoderForced: 0,
+            } as any}
             style={styles.vlcPlayer}
             paused={!isPlaying}
             rate={effectiveSpeed}
@@ -300,14 +356,19 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
             isAudioMutedFallback
               ? { type: SelectedTrackType.DISABLED }
               : selectedAudioTrackIndex !== null
-              ? { type: SelectedTrackType.INDEX, value: selectedAudioTrackIndex }
+              ? { type: SelectedTrackType.INDEX, value: String(selectedAudioTrackIndex) }
               : undefined
           }
           selectedTextTrack={
             selectedTextTrackIndex !== null
-              ? { type: SelectedTrackType.INDEX, value: selectedTextTrackIndex }
+              ? { type: SelectedTrackType.INDEX, value: String(selectedTextTrackIndex) }
               : { type: SelectedTrackType.DISABLED }
           }
+          subtitleStyle={{
+            fontSize: 16,
+            paddingBottom: 45,
+            opacity: 1,
+          }}
           onLoad={onLoad}
           onProgress={onProgress}
           onBuffer={onBuffer}
@@ -374,6 +435,15 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
           <Text style={styles.noticeText} numberOfLines={2}>
             {audioNotice}
           </Text>
+          <TouchableOpacity
+            style={styles.externalActionBtn}
+            onPress={handleOpenExternalPlayer}
+            activeOpacity={0.8}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="open-outline" size={12} color="#FFFFFF" style={{ marginRight: 4 }} />
+            <Text style={styles.externalActionBtnText}>External</Text>
+          </TouchableOpacity>
           <TouchableOpacity onPress={dismissAudioNotice} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
             <Ionicons name="close" size={16} color={COLORS.textMuted} />
           </TouchableOpacity>
@@ -418,6 +488,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
           hasMultipleAudioTracks={audioTracks.length > 1}
           onOpenAudioSelector={() => handleOpenTracksMenu('audio')}
           onPlayWithoutAudio={playWithoutAudio}
+          onOpenExternalPlayer={handleOpenExternalPlayer}
           onRetry={retryPlayback}
           onBackToLibrary={handleExit}
         />
@@ -433,6 +504,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
         selectedTextIndex={selectedTextTrackIndex}
         isAudioMuted={isAudioMutedFallback}
         onDisableAudio={playWithoutAudio}
+        onOpenExternalPlayer={handleOpenExternalPlayer}
         onSelectAudio={selectAudioTrack}
         onSelectSubtitle={selectTextTrack}
         initialTab={trackModalTab}
@@ -640,6 +712,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     lineHeight: 16,
+  },
+  externalActionBtn: {
+    backgroundColor: COLORS.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  externalActionBtnText: {
+    color: '#FFFFFF',
+    fontSize: 11,
+    fontWeight: '700',
   },
   modalBackdrop: {
     flex: 1,

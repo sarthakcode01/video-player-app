@@ -10,8 +10,41 @@ export interface WatchHistoryEntry {
   updatedAt: number;
 }
 
-// In-memory fallback if storage isn't available
+// In-memory fallback and fast cache for instant lookups
 const memoryHistoryCache: Record<string, WatchHistoryEntry> = {};
+
+/**
+ * Preloads all watch history entries into memory in a single multiGet query.
+ * Drastically accelerates initial media library indexing.
+ */
+export async function preloadWatchHistory(): Promise<Record<string, WatchHistoryEntry>> {
+  try {
+    const allKeys = await AsyncStorage.getAllKeys();
+    const historyKeys = allKeys.filter((k) => k.startsWith(STORAGE_KEY_PREFIX));
+    if (historyKeys.length > 0) {
+      const pairs = await AsyncStorage.multiGet(historyKeys);
+      pairs.forEach(([key, val]) => {
+        if (val) {
+          try {
+            const entry: WatchHistoryEntry = JSON.parse(val);
+            const videoId = key.substring(STORAGE_KEY_PREFIX.length);
+            memoryHistoryCache[videoId] = entry;
+          } catch {}
+        }
+      });
+    }
+  } catch (error) {
+    console.warn('Failed to batch preload watch history:', error);
+  }
+  return memoryHistoryCache;
+}
+
+/**
+ * Instant synchronous lookup from memory cache.
+ */
+export function getCachedPlaybackPosition(videoId: string): WatchHistoryEntry | null {
+  return memoryHistoryCache[videoId] || null;
+}
 
 /**
  * Saves video playback timestamp

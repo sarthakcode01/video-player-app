@@ -10,6 +10,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMediaLibraryStore } from '../context/MediaLibraryContext';
 import { VideoCard } from '../components/VideoCard';
+import { VideoCardSkeleton } from '../components/VideoCardSkeleton';
 import { FolderCard } from '../components/FolderCard';
 import { FolderTabBar } from '../components/FolderTabBar';
 import { PermissionPrompt } from '../components/PermissionPrompt';
@@ -115,9 +116,16 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectVideo }) =
 
       {/* Main Content Area */}
       {loading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        </View>
+        <FlatList
+          key={`skeleton-${layout}`}
+          data={[1, 2, 3, 4, 5, 6, 7, 8]}
+          keyExtractor={(item) => `skeleton-${item}`}
+          numColumns={layout === 'grid' ? 2 : 1}
+          columnWrapperStyle={layout === 'grid' ? styles.gridRow : undefined}
+          contentContainerStyle={styles.listContent}
+          renderItem={() => <VideoCardSkeleton layout={layout} />}
+          showsVerticalScrollIndicator={false}
+        />
       ) : viewMode === 'folders' ? (
         /* Folder Grid View */
         <FlatList

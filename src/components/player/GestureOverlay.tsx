@@ -9,6 +9,7 @@ interface GestureOverlayProps {
   onDoubleTapSeek: (side: 'left' | 'right') => void;
   onHoldStart: (side: HoldSide) => void;
   onHoldEnd: () => void;
+  onPinchSnap?: (mode: 'zoom' | 'fit') => void;
   children?: React.ReactNode;
 }
 
@@ -17,6 +18,7 @@ export const GestureOverlay: React.FC<GestureOverlayProps> = ({
   onDoubleTapSeek,
   onHoldStart,
   onHoldEnd,
+  onPinchSnap,
   children,
 }) => {
   const [containerWidth, setContainerWidth] = useState<number>(
@@ -84,12 +86,27 @@ export const GestureOverlay: React.FC<GestureOverlayProps> = ({
         }
       });
 
+    // 4. Pinch recognizer: 2-finger zoom in/out with snap to Fill or Fit
+    const pinch = Gesture.Pinch()
+      .onEnd((e) => {
+        'worklet';
+        if (onPinchSnap) {
+          if (e.scale > 1.12) {
+            runOnJS(onPinchSnap)('zoom');
+          } else if (e.scale < 0.9) {
+            runOnJS(onPinchSnap)('fit');
+          }
+        }
+      });
+
     // Priority hierarchy:
     // DoubleTap has priority over SingleTap (Exclusive)
     const tapGestures = Gesture.Exclusive(doubleTap, singleTap);
     // LongPress races with tap gestures: holding for 250ms activates 2x speed without triggering taps
-    return Gesture.Race(longPress, tapGestures);
-  }, [containerWidth, onSingleTap, onDoubleTapSeek, onHoldStart, onHoldEnd]);
+    const touchGestures = Gesture.Race(longPress, tapGestures);
+    // Pinch runs simultaneously (requires 2 pointers, so it never intercepts 1-finger taps)
+    return Gesture.Simultaneous(pinch, touchGestures);
+  }, [containerWidth, onSingleTap, onDoubleTapSeek, onHoldStart, onHoldEnd, onPinchSnap]);
 
   return (
     <GestureDetector gesture={composedGesture}>

@@ -21,6 +21,7 @@ interface TrackSelectorModalProps {
   selectedTextIndex: number | null;
   isAudioMuted?: boolean;
   onDisableAudio?: () => void;
+  onOpenExternalPlayer?: () => void;
   onSelectAudio: (index: number) => void;
   onSelectSubtitle: (index: number | null) => void;
   initialTab?: 'audio' | 'subtitles';
@@ -35,6 +36,7 @@ export const TrackSelectorModal: React.FC<TrackSelectorModalProps> = ({
   selectedTextIndex,
   isAudioMuted = false,
   onDisableAudio,
+  onOpenExternalPlayer,
   onSelectAudio,
   onSelectSubtitle,
   initialTab = 'audio',
@@ -141,6 +143,28 @@ export const TrackSelectorModal: React.FC<TrackSelectorModalProps> = ({
                     {isAudioMuted && (
                       <Ionicons name="checkmark-circle" size={20} color={COLORS.primary} />
                     )}
+                  </TouchableOpacity>
+                )}
+
+                {/* Option to launch external player with software decoders */}
+                {onOpenExternalPlayer && (
+                  <TouchableOpacity
+                    style={[styles.optionItem, { borderColor: 'rgba(99, 102, 241, 0.35)', borderWidth: 1 }]}
+                    onPress={() => {
+                      onOpenExternalPlayer();
+                      onClose();
+                    }}
+                    activeOpacity={0.7}
+                  >
+                    <View style={styles.trackInfo}>
+                      <Text style={[styles.optionLabel, { color: COLORS.accentYellow }]}>
+                        Play in VLC / MX Player
+                      </Text>
+                      <Text style={styles.optionSub}>
+                        Open in external player with full Dolby / multi-channel audio
+                      </Text>
+                    </View>
+                    <Ionicons name="open-outline" size={20} color={COLORS.accentYellow} />
                   </TouchableOpacity>
                 )}
 

@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import * as MediaLibrary from 'expo-media-library';
 import { Linking, Platform } from 'react-native';
 import { VideoAsset, VideoFolder, SortOption, DurationFilterOption, LibraryViewMode } from '../types/video';
-import { getPlaybackPosition } from '../utils/watchHistory';
+import { preloadWatchHistory, getCachedPlaybackPosition } from '../utils/watchHistory';
 
 export type PermissionState = 'undetermined' | 'granted' | 'limited' | 'denied';
 
@@ -98,9 +98,9 @@ export const MediaLibraryProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, []);
 
-  // Map MediaLibrary Asset to internal VideoAsset with watch history
-  const mapAsset = async (item: MediaLibrary.Asset, albumTitleMap: Record<string, string>): Promise<VideoAsset> => {
-    const history = await getPlaybackPosition(item.id);
+  // Map MediaLibrary Asset to internal VideoAsset with cached watch history (synchronous)
+  const mapAsset = (item: MediaLibrary.Asset, albumTitleMap: Record<string, string>): VideoAsset => {
+    const history = getCachedPlaybackPosition(item.id);
     return {
       id: item.id,
       uri: item.uri,
@@ -124,29 +124,28 @@ export const MediaLibraryProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
 
     try {
-      // 1. Fetch Albums / Folders
-      let albums: MediaLibrary.Album[] = [];
-      try {
-        albums = await MediaLibrary.getAlbumsAsync({ includeSmartAlbums: true });
-      } catch (albumErr) {
-        console.warn('Album scan error:', albumErr);
-      }
+      // 1. Fetch Albums, Assets & Watch History concurrently in parallel
+      const [, albumsResult, assetsResponse] = await Promise.all([
+        preloadWatchHistory(),
+        MediaLibrary.getAlbumsAsync().catch((albumErr) => {
+          console.warn('Album scan error:', albumErr);
+          return [] as MediaLibrary.Album[];
+        }),
+        MediaLibrary.getAssetsAsync({
+          mediaType: [MediaLibrary.MediaType.video],
+          first: SCAN_BATCH_SIZE,
+          sortBy: [[MediaLibrary.SortBy.creationTime, false]],
+        }),
+      ]);
 
       const albumTitleMap: Record<string, string> = {};
-      albums.forEach((album) => {
+      albumsResult.forEach((album) => {
         albumTitleMap[album.id] = album.title;
       });
 
-      // 2. Fetch Video Assets
-      const assetsResponse = await MediaLibrary.getAssetsAsync({
-        mediaType: [MediaLibrary.MediaType.video],
-        first: SCAN_BATCH_SIZE,
-        sortBy: [[MediaLibrary.SortBy.creationTime, false]],
-      });
-
-      // Map assets and attach watch history
-      const mappedAssets: VideoAsset[] = await Promise.all(
-        assetsResponse.assets.map((asset) => mapAsset(asset, albumTitleMap))
+      // Map assets synchronously with zero bridge wait
+      const mappedAssets: VideoAsset[] = assetsResponse.assets.map((asset) =>
+        mapAsset(asset, albumTitleMap)
       );
 
       // 3. Compute folder counts and thumbnail previews

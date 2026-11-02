@@ -70,7 +70,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
   };
 
   const bottomBarPaddingStyle = {
-    paddingBottom: Math.max(insets.bottom, 12),
+    paddingBottom: Math.max(insets.bottom, 6),
     paddingLeft: Math.max(insets.left, SPACING.md),
     paddingRight: Math.max(insets.right, SPACING.md),
   };
@@ -157,7 +157,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                 onPress={onToggleSpeedMenu}
                 activeOpacity={0.7}
               >
-                <Ionicons name="speedometer-outline" size={16} color={COLORS.textSecondary} />
+                <Ionicons name="speedometer-outline" size={17} color="#FFFFFF" />
                 <Text style={styles.speedSelectorText}>Speed: {playbackSpeed}x</Text>
               </TouchableOpacity>
             )}
@@ -170,7 +170,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
                 onPress={onCycleAspect}
                 activeOpacity={0.7}
               >
-                <Ionicons name="scan-outline" size={16} color="#FFFFFF" />
+                <Ionicons name="scan-outline" size={17} color="#FFFFFF" />
                 {aspectLabel ? <Text style={styles.aspectButtonText}>{aspectLabel}</Text> : null}
               </TouchableOpacity>
             )}
@@ -197,7 +197,7 @@ export const PlayerOverlay: React.FC<PlayerOverlayProps> = ({
               >
                 <Ionicons
                   name={isFullscreen ? 'contract-outline' : 'expand-outline'}
-                  size={20}
+                  size={18}
                   color="#FFFFFF"
                 />
               </TouchableOpacity>
@@ -257,19 +257,21 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   centerContainer: {
+    ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
   },
   bottomBar: {
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingTop: SPACING.xs,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    paddingTop: 4,
   },
   bottomActionsRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: SPACING.xs,
-    paddingTop: 2,
+    paddingHorizontal: SPACING.md,
+    paddingTop: 4,
+    paddingBottom: 4,
   },
   bottomLeftActions: {
     flexDirection: 'row',
@@ -278,28 +280,32 @@ const styles = StyleSheet.create({
   speedSelectorButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 6,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    paddingHorizontal: 12,
+    height: 36,
+    borderRadius: 18,
     gap: 6,
   },
   speedSelectorText: {
-    color: COLORS.text,
+    color: '#FFFFFF',
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   bottomRightActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    gap: 12,
   },
   aspectButton: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    paddingHorizontal: 10,
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    paddingHorizontal: 12,
     height: 36,
     borderRadius: 18,
   },
@@ -309,7 +315,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   lockButtonActive: {
-    backgroundColor: 'rgba(234, 179, 8, 0.2)',
+    backgroundColor: 'rgba(234, 179, 8, 0.28)',
+    borderColor: '#EAB308',
   },
   fullscreenButton: {
     width: 36,
@@ -317,6 +324,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
   },
 });

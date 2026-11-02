@@ -10,6 +10,7 @@ interface PlayerErrorFallbackProps {
   hasMultipleAudioTracks: boolean;
   onOpenAudioSelector: () => void;
   onPlayWithoutAudio?: () => void;
+  onOpenExternalPlayer?: () => void;
   onRetry: () => void;
   onBackToLibrary: () => void;
 }
@@ -20,6 +21,7 @@ export const PlayerErrorFallback: React.FC<PlayerErrorFallbackProps> = ({
   hasMultipleAudioTracks,
   onOpenAudioSelector,
   onPlayWithoutAudio,
+  onOpenExternalPlayer,
   onRetry,
   onBackToLibrary,
 }) => {
@@ -85,6 +87,17 @@ export const PlayerErrorFallback: React.FC<PlayerErrorFallbackProps> = ({
             >
               <Ionicons name="chatbox-ellipses-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
               <Text style={styles.primaryButtonText}>Watch Video with Subtitles</Text>
+            </TouchableOpacity>
+          )}
+
+          {onOpenExternalPlayer && (
+            <TouchableOpacity
+              style={styles.primaryButton}
+              onPress={onOpenExternalPlayer}
+              activeOpacity={0.8}
+            >
+              <Ionicons name="open-outline" size={16} color="#FFFFFF" style={{ marginRight: 6 }} />
+              <Text style={styles.primaryButtonText}>Open in VLC / MX Player</Text>
             </TouchableOpacity>
           )}
 
