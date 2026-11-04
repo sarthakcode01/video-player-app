@@ -67,7 +67,15 @@
         "react-native-video",
         {}
       ],
-      "react-native-vlc-media-player"
+      "react-native-vlc-media-player",
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 26
+          }
+        }
+      ]
     ],
     "extra": {
       "eas": {
