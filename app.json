@@ -37,6 +37,20 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.ACCESS_MEDIA_LOCATION"
+      ],
+      "intentFilters": [
+        {
+          "action": "VIEW",
+          "category": [
+            "DEFAULT",
+            "BROWSABLE"
+          ],
+          "data": [
+            { "mimeType": "video/*" },
+            { "scheme": "content", "mimeType": "video/*" },
+            { "scheme": "file", "mimeType": "video/*" }
+          ]
+        }
       ]
     },
     "plugins": [

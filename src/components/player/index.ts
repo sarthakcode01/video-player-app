@@ -5,3 +5,4 @@ export * from './DoubleTapRippleIndicator';
 export * from './GestureOverlay';
 export * from './TrackSelectorModal';
 export * from './PlayerErrorFallback';
+export * from './PlayerGestureHUD';

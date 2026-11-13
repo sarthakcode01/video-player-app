@@ -16,6 +16,7 @@ import { FolderTabBar } from '../components/FolderTabBar';
 import { PermissionPrompt } from '../components/PermissionPrompt';
 import { EmptyLibrary } from '../components/EmptyLibrary';
 import { LibraryHeader } from '../components/LibraryHeader';
+import { WatchHistoryListView } from '../components/WatchHistoryListView';
 import { VideoAsset, VideoFolder } from '../types/video';
 import { COLORS, SPACING } from '../constants/theme';
 
@@ -86,7 +87,7 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectVideo }) =
         layout={layout}
         onToggleLayout={() => setLayout(layout === 'grid' ? 'list' : 'grid')}
         viewMode={viewMode}
-        onToggleViewMode={() => setViewMode(viewMode === 'videos' ? 'folders' : 'videos')}
+        onSelectViewMode={(mode) => setViewMode(mode)}
         sortBy={sortBy}
         onChangeSort={setSortBy}
         durationFilter={durationFilter}
@@ -126,6 +127,9 @@ export const LibraryScreen: React.FC<LibraryScreenProps> = ({ onSelectVideo }) =
           renderItem={() => <VideoCardSkeleton layout={layout} />}
           showsVerticalScrollIndicator={false}
         />
+      ) : viewMode === 'history' ? (
+        /* Watch History View */
+        <WatchHistoryListView onSelectVideo={onSelectVideo} />
       ) : viewMode === 'folders' ? (
         /* Folder Grid View */
         <FlatList

@@ -105,3 +105,22 @@ export function formatTrackLabel(
 
   return `${fallbackType} Track ${track.index + 1}`;
 }
+
+/**
+ * Formats an epoch timestamp into a friendly relative time (e.g. 'Just now', '15m ago', 'Yesterday')
+ */
+export function formatRelativeTime(timestamp?: number): string {
+  if (!timestamp) return '';
+  const now = Date.now();
+  const diffSec = Math.floor((now - timestamp) / 1000);
+  if (diffSec < 60) return 'Just now';
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHours = Math.floor(diffMin / 60);
+  if (diffHours < 24) return `${diffHours}h ago`;
+  const diffDays = Math.floor(diffHours / 24);
+  if (diffDays === 1) return 'Yesterday';
+  if (diffDays < 7) return `${diffDays}d ago`;
+  const date = new Date(timestamp);
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}

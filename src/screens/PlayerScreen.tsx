@@ -21,6 +21,7 @@ import { PlayerOverlay } from '../components/player/PlayerOverlay';
 import { DoubleTapRippleIndicator } from '../components/player/DoubleTapRippleIndicator';
 import { HoldSpeedIndicator } from '../components/player/HoldSpeedIndicator';
 import { GestureOverlay } from '../components/player/GestureOverlay';
+import { PlayerGestureHUD, GestureHUDType } from '../components/player/PlayerGestureHUD';
 import { TrackSelectorModal } from '../components/player/TrackSelectorModal';
 import { PlayerErrorFallback } from '../components/player/PlayerErrorFallback';
 import { openInExternalPlayer } from '../utils/externalPlayer';
@@ -47,6 +48,23 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
   const [showSpeedModal, setShowSpeedModal] = useState<boolean>(false);
   const [showTrackModal, setShowTrackModal] = useState<boolean>(false);
   const [trackModalTab, setTrackModalTab] = useState<'audio' | 'subtitles'>('audio');
+
+  // Interactive gestures state: Continuous Zoom, In-App Brightness, and Volume
+  const [userZoomScale, setUserZoomScale] = useState<number>(1.0);
+  const [brightness, setBrightness] = useState<number>(1.0);
+  const [volume, setVolume] = useState<number>(1.0);
+  const [gestureHUD, setGestureHUD] = useState<{
+    type: GestureHUDType;
+    value: number;
+    visible: boolean;
+  }>({
+    type: null,
+    value: 1.0,
+    visible: false,
+  });
+  const baseZoomRef = useRef<number>(1.0);
+  const baseSwipeValRef = useRef<number>(1.0);
+  const hudTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Resume prompt state
   const [resumePromptPosition, setResumePromptPosition] = useState<number | null>(null);
@@ -141,6 +159,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
   useEffect(() => {
     return () => {
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
     };
   }, []);
 
@@ -150,6 +169,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
       isFirstAspectRender.current = false;
       return;
     }
+    setUserZoomScale(1.0);
     showToast(`Aspect ratio: ${ASPECT_LABELS[aspectMode]}`);
   }, [aspectMode, showToast]);
 
@@ -159,14 +179,67 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
     showToast(willLock ? 'Orientation locked' : 'Auto-rotate on');
   }, [isLocked, toggleLock, showToast]);
 
-  // Two-finger pinch to snap between original ratio (fit) and edge-to-edge (zoom)
-  const handlePinchSnap = useCallback(
-    (mode: 'zoom' | 'fit') => {
-      setAspectMode(mode);
-      showToast(mode === 'zoom' ? 'Zoomed to fill' : 'Original (Fit)');
+  // Continuous 2-Finger Pinch-to-Zoom handlers
+  const handlePinchStart = useCallback(() => {
+    baseZoomRef.current = userZoomScale;
+    if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
+    setGestureHUD({ type: 'zoom', value: userZoomScale, visible: true });
+  }, [userZoomScale]);
+
+  const handlePinchChange = useCallback((scaleFactor: number) => {
+    const raw = baseZoomRef.current * scaleFactor;
+    const clamped = Math.max(0.5, Math.min(3.0, raw));
+    setUserZoomScale(clamped);
+    setGestureHUD({ type: 'zoom', value: clamped, visible: true });
+  }, []);
+
+  const handlePinchEnd = useCallback(() => {
+    setUserZoomScale((curr) => {
+      // Clean snap to 1.0 (original) if within 0.95 - 1.05
+      const finalScale = curr > 0.95 && curr < 1.05 ? 1.0 : curr;
+      setGestureHUD({ type: 'zoom', value: finalScale, visible: true });
+      return finalScale;
+    });
+    if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
+    hudTimerRef.current = setTimeout(() => {
+      setGestureHUD((prev) => ({ ...prev, visible: false }));
+    }, 1200);
+  }, []);
+
+  // Vertical Pan Gestures: Left half = Brightness, Right half = Volume
+  const handleVerticalSwipeStart = useCallback(
+    (side: 'left' | 'right') => {
+      if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
+      const val = side === 'left' ? brightness : volume;
+      baseSwipeValRef.current = val;
+      setGestureHUD({
+        type: side === 'left' ? 'brightness' : 'volume',
+        value: val,
+        visible: true,
+      });
     },
-    [setAspectMode, showToast]
+    [brightness, volume]
   );
+
+  const handleVerticalSwipeChange = useCallback((side: 'left' | 'right', translationY: number) => {
+    // Invert: Dragging UP is negative translationY; dragging UP increases value
+    const delta = -translationY / 240;
+    const nextVal = Math.max(0, Math.min(1, baseSwipeValRef.current + delta));
+    if (side === 'left') {
+      setBrightness(nextVal);
+      setGestureHUD({ type: 'brightness', value: nextVal, visible: true });
+    } else {
+      setVolume(nextVal);
+      setGestureHUD({ type: 'volume', value: nextVal, visible: true });
+    }
+  }, []);
+
+  const handleVerticalSwipeEnd = useCallback((_side: 'left' | 'right') => {
+    if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
+    hudTimerRef.current = setTimeout(() => {
+      setGestureHUD((prev) => ({ ...prev, visible: false }));
+    }, 1200);
+  }, []);
 
   // Video box: Fit/Stretch/Zoom fill the screen (resizeMode does the work); 16:9 and 4:3
   // are a centered box with that exact ratio, with the video stretched to fill it.
@@ -179,12 +252,18 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
   const videoBoxStyle = useMemo(() => {
     const ratio = aspectMode === '16:9' ? 16 / 9 : aspectMode === '4:3' ? 4 / 3 : null;
     const { width: cw, height: ch } = containerSize;
-    if (!ratio || cw === 0 || ch === 0) return styles.videoBoxFull;
-    const containerRatio = cw / ch;
-    return containerRatio > ratio
-      ? { width: ch * ratio, height: ch }
-      : { width: cw, height: cw / ratio };
-  }, [aspectMode, containerSize]);
+    const baseStyle =
+      !ratio || cw === 0 || ch === 0
+        ? styles.videoBoxFull
+        : cw / ch > ratio
+        ? { width: ch * ratio, height: ch }
+        : { width: cw, height: cw / ratio };
+
+    return [
+      baseStyle,
+      userZoomScale !== 1.0 && { transform: [{ scale: userZoomScale }] },
+    ];
+  }, [aspectMode, containerSize, userZoomScale]);
 
   const exoResizeMode = aspectMode === 'fit' ? 'contain' : aspectMode === 'zoom' ? 'cover' : 'stretch';
   const vlcResizeMode = aspectMode === 'fit' ? 'contain' : aspectMode === 'zoom' ? 'cover' : 'fill';
@@ -234,14 +313,22 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
   useEffect(() => {
     if (currentTime > 5 && duration > 0 && Math.abs(currentTime - lastSavedTimeRef.current) >= 5) {
       lastSavedTimeRef.current = currentTime;
-      savePlaybackPosition(asset.id, currentTime, duration);
+      savePlaybackPosition(asset.id, currentTime, duration, {
+        filename: asset.filename,
+        uri: asset.uri,
+        albumTitle: asset.albumTitle,
+      });
     }
-  }, [asset.id, currentTime, duration]);
+  }, [asset.id, asset.filename, asset.uri, asset.albumTitle, currentTime, duration]);
 
   // Safe exit handling restoring portrait mode and saving progress
   const handleExit = async () => {
     if (currentTime > 5 && duration > 0) {
-      await savePlaybackPosition(asset.id, currentTime, duration);
+      await savePlaybackPosition(asset.id, currentTime, duration, {
+        filename: asset.filename,
+        uri: asset.uri,
+        albumTitle: asset.albumTitle,
+      });
     }
     await exitFullscreen();
     onClose();
@@ -299,7 +386,12 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
         onDoubleTapSeek={handleDoubleTapSeek}
         onHoldStart={onHoldStart}
         onHoldEnd={onHoldEnd}
-        onPinchSnap={handlePinchSnap}
+        onPinchStart={handlePinchStart}
+        onPinchChange={handlePinchChange}
+        onPinchEnd={handlePinchEnd}
+        onVerticalSwipeStart={handleVerticalSwipeStart}
+        onVerticalSwipeChange={handleVerticalSwipeChange}
+        onVerticalSwipeEnd={handleVerticalSwipeEnd}
       >
         <View style={styles.videoStage} onLayout={handleContainerLayout} pointerEvents="none">
         <View style={videoBoxStyle}>
@@ -318,6 +410,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
             style={styles.vlcPlayer}
             paused={!isPlaying}
             rate={effectiveSpeed}
+            volume={Math.round(volume * 100)}
             resizeMode={vlcResizeMode}
             muted={isAudioMutedFallback}
             audioTrack={
@@ -341,6 +434,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
           controls={false}
           paused={!isPlaying}
           rate={effectiveSpeed}
+          volume={volume}
           resizeMode={exoResizeMode}
           progressUpdateInterval={500}
           useTextureView={Platform.OS === 'android'} // Fixes ERROR_CODE_DECODER_INIT_FAILED surface conflicts on Android
@@ -378,11 +472,31 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
         />
         )}
         </View>
+        {/* In-App Brightness Dimming Tint (Hardware-accelerated, non-blocking) */}
+        {brightness < 1.0 && (
+          <View
+            style={[
+              StyleSheet.absoluteFill,
+              {
+                backgroundColor: '#000000',
+                opacity: (1 - brightness) * 0.85,
+              },
+            ]}
+            pointerEvents="none"
+          />
+        )}
         </View>
 
         {/* YouTube Double-Tap Animated Ripple Indicator */}
         <DoubleTapRippleIndicator side={doubleTapSide} seconds={accumulatedSeek} />
       </GestureOverlay>
+
+      {/* Visual Gesture HUD for Volume, Brightness, and Zoom */}
+      <PlayerGestureHUD
+        type={gestureHUD.type}
+        value={gestureHUD.value}
+        visible={gestureHUD.visible}
+      />
 
       {/* Fast-forward indicator while holding the left/right side */}
       <HoldSpeedIndicator side={holdSide} speed={holdSpeed} />
@@ -583,6 +697,7 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     justifyContent: 'center',
     alignItems: 'center',
+    overflow: 'hidden',
   },
   videoBoxFull: {
     width: '100%',

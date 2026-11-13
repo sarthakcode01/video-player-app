@@ -22,7 +22,18 @@ export interface VideoFolder {
 export type PlaybackSpeed = 1.0 | 1.25 | 1.5 | 1.75 | 2.0;
 export type SortOption = 'date_desc' | 'date_asc' | 'title_asc' | 'duration_desc';
 export type DurationFilterOption = 'all' | 'movies' | 'shorts'; // movies = >20m, shorts = <5m
-export type LibraryViewMode = 'videos' | 'folders';
+export type LibraryViewMode = 'videos' | 'folders' | 'history';
+
+export interface WatchHistoryItem {
+  videoId: string;
+  uri: string;
+  filename: string;
+  duration: number; // in seconds
+  position: number; // in seconds
+  percent: number; // 0 to 100
+  updatedAt: number; // timestamp
+  albumTitle?: string;
+}
 
 export interface AudioTrack {
   index: number;

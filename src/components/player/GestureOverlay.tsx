@@ -1,7 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { View, StyleSheet, Dimensions, LayoutChangeEvent } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { runOnJS } from 'react-native-reanimated';
+import { runOnJS, useSharedValue } from 'react-native-reanimated';
 import { HoldSide } from '../../types/video';
 
 interface GestureOverlayProps {
@@ -9,6 +9,15 @@ interface GestureOverlayProps {
   onDoubleTapSeek: (side: 'left' | 'right') => void;
   onHoldStart: (side: HoldSide) => void;
   onHoldEnd: () => void;
+  // Continuous Pinch-to-Zoom
+  onPinchStart?: () => void;
+  onPinchChange?: (scaleFactor: number) => void;
+  onPinchEnd?: () => void;
+  // Vertical Swiping (Left: Brightness, Right: Volume)
+  onVerticalSwipeStart?: (side: 'left' | 'right') => void;
+  onVerticalSwipeChange?: (side: 'left' | 'right', translationY: number) => void;
+  onVerticalSwipeEnd?: (side: 'left' | 'right') => void;
+  // Legacy / convenience
   onPinchSnap?: (mode: 'zoom' | 'fit') => void;
   children?: React.ReactNode;
 }
@@ -18,17 +27,26 @@ export const GestureOverlay: React.FC<GestureOverlayProps> = ({
   onDoubleTapSeek,
   onHoldStart,
   onHoldEnd,
+  onPinchStart,
+  onPinchChange,
+  onPinchEnd,
+  onVerticalSwipeStart,
+  onVerticalSwipeChange,
+  onVerticalSwipeEnd,
   onPinchSnap,
   children,
 }) => {
-  const [containerWidth, setContainerWidth] = useState<number>(
-    Dimensions.get('window').width
-  );
+  const [containerSize, setContainerSize] = useState({
+    width: Dimensions.get('window').width,
+    height: Dimensions.get('window').height,
+  });
+
+  const panSide = useSharedValue<'left' | 'right'>('right');
 
   const onLayout = (event: LayoutChangeEvent) => {
-    const { width } = event.nativeEvent.layout;
-    if (width > 0) {
-      setContainerWidth(width);
+    const { width, height } = event.nativeEvent.layout;
+    if (width > 0 && height > 0) {
+      setContainerSize({ width, height });
     }
   };
 
@@ -45,12 +63,11 @@ export const GestureOverlay: React.FC<GestureOverlayProps> = ({
     // 2. Double-Tap recognizer: Screen zone partitioning (Left 40% vs Right 40% vs Center 20%)
     const doubleTap = Gesture.Tap()
       .numberOfTaps(2)
-      // Single taps wait out this window before firing, so keep it short for snappy control toggling
       .maxDelay(250)
       .onEnd((e) => {
         'worklet';
         const x = e.x;
-        const width = containerWidth;
+        const width = containerSize.width;
         const leftBoundary = width * 0.4;
         const rightBoundary = width * 0.6;
 
@@ -66,12 +83,12 @@ export const GestureOverlay: React.FC<GestureOverlayProps> = ({
         }
       });
 
-    // 3. Long-Press recognizer: holding the left or right 40% fast-forwards; the center 20% does nothing
+    // 3. Long-Press recognizer: holding the left or right 40% fast-forwards
     const longPress = Gesture.LongPress()
       .minDuration(250)
       .onStart((e) => {
         'worklet';
-        const width = containerWidth;
+        const width = containerSize.width;
         if (e.x <= width * 0.4) {
           runOnJS(onHoldStart)('left');
         } else if (e.x >= width * 0.6) {
@@ -80,33 +97,86 @@ export const GestureOverlay: React.FC<GestureOverlayProps> = ({
       })
       .onFinalize((_e, success) => {
         'worklet';
-        // onFinalize also fires for plain taps; only end a hold that actually began
         if (success) {
           runOnJS(onHoldEnd)();
         }
       });
 
-    // 4. Pinch recognizer: 2-finger zoom in/out with snap to Fill or Fit
+    // 4. Continuous Pinch-to-Zoom recognizer (2-finger)
     const pinch = Gesture.Pinch()
+      .onStart(() => {
+        'worklet';
+        if (onPinchStart) {
+          runOnJS(onPinchStart)();
+        }
+      })
+      .onUpdate((e) => {
+        'worklet';
+        if (onPinchChange) {
+          runOnJS(onPinchChange)(e.scale);
+        }
+      })
       .onEnd((e) => {
         'worklet';
+        if (onPinchEnd) {
+          runOnJS(onPinchEnd)();
+        }
         if (onPinchSnap) {
-          if (e.scale > 1.12) {
+          if (e.scale > 1.15) {
             runOnJS(onPinchSnap)('zoom');
-          } else if (e.scale < 0.9) {
+          } else if (e.scale < 0.88) {
             runOnJS(onPinchSnap)('fit');
           }
+        }
+      });
+
+    // 5. Vertical Pan recognizer: Left 50% = Brightness, Right 50% = Volume
+    const verticalPan = Gesture.Pan()
+      .minDistance(10)
+      .maxPointers(1)
+      .activeOffsetY([-12, 12])
+      .failOffsetX([-25, 25])
+      .onStart((e) => {
+        'worklet';
+        panSide.value = e.x < containerSize.width * 0.5 ? 'left' : 'right';
+        if (onVerticalSwipeStart) {
+          runOnJS(onVerticalSwipeStart)(panSide.value);
+        }
+      })
+      .onUpdate((e) => {
+        'worklet';
+        if (onVerticalSwipeChange) {
+          runOnJS(onVerticalSwipeChange)(panSide.value, e.translationY);
+        }
+      })
+      .onFinalize(() => {
+        'worklet';
+        if (onVerticalSwipeEnd) {
+          runOnJS(onVerticalSwipeEnd)(panSide.value);
         }
       });
 
     // Priority hierarchy:
     // DoubleTap has priority over SingleTap (Exclusive)
     const tapGestures = Gesture.Exclusive(doubleTap, singleTap);
-    // LongPress races with tap gestures: holding for 250ms activates 2x speed without triggering taps
+    // LongPress races with tap gestures (holding for 250ms starts hold before tap fires)
     const touchGestures = Gesture.Race(longPress, tapGestures);
-    // Pinch runs simultaneously (requires 2 pointers, so it never intercepts 1-finger taps)
-    return Gesture.Simultaneous(pinch, touchGestures);
-  }, [containerWidth, onSingleTap, onDoubleTapSeek, onHoldStart, onHoldEnd, onPinchSnap]);
+    // Pan and Pinch can execute simultaneously with touch gestures (Gesture Handler cancels taps once Pan/Pinch passes threshold)
+    return Gesture.Simultaneous(pinch, verticalPan, touchGestures);
+  }, [
+    containerSize.width,
+    onSingleTap,
+    onDoubleTapSeek,
+    onHoldStart,
+    onHoldEnd,
+    onPinchStart,
+    onPinchChange,
+    onPinchEnd,
+    onPinchSnap,
+    onVerticalSwipeStart,
+    onVerticalSwipeChange,
+    onVerticalSwipeEnd,
+  ]);
 
   return (
     <GestureDetector gesture={composedGesture}>

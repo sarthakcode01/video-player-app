@@ -5,4 +5,5 @@ export * from './FolderTabBar';
 export * from './PermissionPrompt';
 export * from './EmptyLibrary';
 export * from './LibraryHeader';
+export * from './WatchHistoryListView';
 export * from './player';

@@ -15,7 +15,8 @@ interface LibraryHeaderProps {
   layout: 'grid' | 'list';
   onToggleLayout: () => void;
   viewMode: LibraryViewMode;
-  onToggleViewMode: () => void;
+  onToggleViewMode?: () => void;
+  onSelectViewMode: (mode: LibraryViewMode) => void;
   sortBy: SortOption;
   onChangeSort: (option: SortOption) => void;
   durationFilter: DurationFilterOption;
@@ -36,6 +37,7 @@ export const LibraryHeader: React.FC<LibraryHeaderProps> = ({
   onToggleLayout,
   viewMode,
   onToggleViewMode,
+  onSelectViewMode,
   sortBy,
   onChangeSort,
   durationFilter,
@@ -68,12 +70,17 @@ export const LibraryHeader: React.FC<LibraryHeaderProps> = ({
               <Ionicons name="arrow-back" size={18} color={COLORS.primary} />
               <Text style={styles.breadcrumbText}>{selectedFolderName}</Text>
             </TouchableOpacity>
+          ) : viewMode === 'history' ? (
+            <Text style={styles.title}>Watch History</Text>
+          ) : viewMode === 'folders' ? (
+            <Text style={styles.title}>Folders</Text>
           ) : (
             <Text style={styles.title}>Media Library</Text>
           )}
           <Text style={styles.subtitle}>
-            {filteredCount} {filteredCount === 1 ? 'video' : 'videos'}
-            {filteredCount !== totalCount ? ` of ${totalCount}` : ''}
+            {viewMode === 'history'
+              ? 'Resume your recent videos'
+              : `${filteredCount} ${filteredCount === 1 ? 'video' : 'videos'}${filteredCount !== totalCount ? ` of ${totalCount}` : ''}`}
           </Text>
         </View>
 
@@ -92,10 +99,23 @@ export const LibraryHeader: React.FC<LibraryHeaderProps> = ({
             )}
           </TouchableOpacity>
 
+          {/* Watch History Mode Button */}
+          <TouchableOpacity
+            style={[styles.iconButton, viewMode === 'history' && styles.iconButtonActive]}
+            onPress={() => onSelectViewMode(viewMode === 'history' ? 'videos' : 'history')}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name={viewMode === 'history' ? 'time' : 'time-outline'}
+              size={19}
+              color={viewMode === 'history' ? COLORS.primary : COLORS.text}
+            />
+          </TouchableOpacity>
+
           {/* View Mode Toggle: Folders View vs Videos View */}
           <TouchableOpacity
             style={[styles.iconButton, viewMode === 'folders' && styles.iconButtonActive]}
-            onPress={onToggleViewMode}
+            onPress={() => onSelectViewMode(viewMode === 'folders' ? 'videos' : 'folders')}
             activeOpacity={0.7}
           >
             <Ionicons
