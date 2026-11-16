@@ -15,6 +15,11 @@ import { VLCPlayer } from 'react-native-vlc-media-player';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { SafeNavigationBar } from '../utils/safeNavigationBar';
 import { VideoAsset, PlaybackSpeed, AspectMode } from '../types/video';
+import AnimatedReanimated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withTiming,
+} from 'react-native-reanimated';
 import { useVideoPlayerController, HOLD_SPEED_OPTIONS } from '../hooks/useVideoPlayerController';
 import { useOrientation } from '../hooks/useOrientation';
 import { PlayerOverlay } from '../components/player/PlayerOverlay';
@@ -49,10 +54,16 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
   const [showTrackModal, setShowTrackModal] = useState<boolean>(false);
   const [trackModalTab, setTrackModalTab] = useState<'audio' | 'subtitles'>('audio');
 
-  // Interactive gestures state: Continuous Zoom, In-App Brightness, and Volume
-  const [userZoomScale, setUserZoomScale] = useState<number>(1.0);
+  // Interactive gestures state: Hardware-accelerated continuous zoom, in-app brightness, and volume
+  const zoomScaleShared = useSharedValue(1.0);
+  const baseZoomScaleShared = useSharedValue(1.0);
   const [brightness, setBrightness] = useState<number>(1.0);
   const [volume, setVolume] = useState<number>(1.0);
+  const brightnessRef = useRef<number>(1.0);
+  const volumeRef = useRef<number>(1.0);
+  const baseSwipeValRef = useRef<number>(1.0);
+  const hudTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [gestureHUD, setGestureHUD] = useState<{
     type: GestureHUDType;
     value: number;
@@ -62,9 +73,12 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
     value: 1.0,
     visible: false,
   });
-  const baseZoomRef = useRef<number>(1.0);
-  const baseSwipeValRef = useRef<number>(1.0);
-  const hudTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const animatedZoomStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ scale: zoomScaleShared.value }],
+    };
+  });
 
   // Resume prompt state
   const [resumePromptPosition, setResumePromptPosition] = useState<number | null>(null);
@@ -169,9 +183,10 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
       isFirstAspectRender.current = false;
       return;
     }
-    setUserZoomScale(1.0);
+    zoomScaleShared.value = withTiming(1.0, { duration: 150 });
+    baseZoomScaleShared.value = 1.0;
     showToast(`Aspect ratio: ${ASPECT_LABELS[aspectMode]}`);
-  }, [aspectMode, showToast]);
+  }, [aspectMode, showToast, zoomScaleShared, baseZoomScaleShared]);
 
   const handleToggleLock = useCallback(async () => {
     const willLock = !isLocked;
@@ -181,36 +196,41 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
 
   // Continuous 2-Finger Pinch-to-Zoom handlers
   const handlePinchStart = useCallback(() => {
-    baseZoomRef.current = userZoomScale;
+    baseZoomScaleShared.value = zoomScaleShared.value;
     if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
-    setGestureHUD({ type: 'zoom', value: userZoomScale, visible: true });
-  }, [userZoomScale]);
+    setGestureHUD({ type: 'zoom', value: zoomScaleShared.value, visible: true });
+  }, [zoomScaleShared, baseZoomScaleShared]);
 
-  const handlePinchChange = useCallback((scaleFactor: number) => {
-    const raw = baseZoomRef.current * scaleFactor;
-    const clamped = Math.max(0.5, Math.min(3.0, raw));
-    setUserZoomScale(clamped);
-    setGestureHUD({ type: 'zoom', value: clamped, visible: true });
-  }, []);
+  const handlePinchChange = useCallback(
+    (scaleFactor: number) => {
+      const raw = baseZoomScaleShared.value * scaleFactor;
+      const clamped = Math.max(0.5, Math.min(3.0, raw));
+      zoomScaleShared.value = clamped;
+      setGestureHUD({ type: 'zoom', value: clamped, visible: true });
+    },
+    [zoomScaleShared, baseZoomScaleShared]
+  );
 
   const handlePinchEnd = useCallback(() => {
-    setUserZoomScale((curr) => {
-      // Clean snap to 1.0 (original) if within 0.95 - 1.05
-      const finalScale = curr > 0.95 && curr < 1.05 ? 1.0 : curr;
-      setGestureHUD({ type: 'zoom', value: finalScale, visible: true });
-      return finalScale;
-    });
+    let finalScale = zoomScaleShared.value;
+    // Clean snap to 1.0 (original) if within 0.95 - 1.05
+    if (finalScale > 0.95 && finalScale < 1.05) {
+      finalScale = 1.0;
+      zoomScaleShared.value = withTiming(1.0, { duration: 150 });
+    }
+    baseZoomScaleShared.value = finalScale;
+    setGestureHUD({ type: 'zoom', value: finalScale, visible: true });
     if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
     hudTimerRef.current = setTimeout(() => {
       setGestureHUD((prev) => ({ ...prev, visible: false }));
     }, 1200);
-  }, []);
+  }, [zoomScaleShared, baseZoomScaleShared]);
 
   // Vertical Pan Gestures: Left half = Brightness, Right half = Volume
   const handleVerticalSwipeStart = useCallback(
     (side: 'left' | 'right') => {
       if (hudTimerRef.current) clearTimeout(hudTimerRef.current);
-      const val = side === 'left' ? brightness : volume;
+      const val = side === 'left' ? brightnessRef.current : volumeRef.current;
       baseSwipeValRef.current = val;
       setGestureHUD({
         type: side === 'left' ? 'brightness' : 'volume',
@@ -218,7 +238,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
         visible: true,
       });
     },
-    [brightness, volume]
+    []
   );
 
   const handleVerticalSwipeChange = useCallback((side: 'left' | 'right', translationY: number) => {
@@ -226,9 +246,11 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
     const delta = -translationY / 240;
     const nextVal = Math.max(0, Math.min(1, baseSwipeValRef.current + delta));
     if (side === 'left') {
+      brightnessRef.current = nextVal;
       setBrightness(nextVal);
       setGestureHUD({ type: 'brightness', value: nextVal, visible: true });
     } else {
+      volumeRef.current = nextVal;
       setVolume(nextVal);
       setGestureHUD({ type: 'volume', value: nextVal, visible: true });
     }
@@ -252,18 +274,12 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
   const videoBoxStyle = useMemo(() => {
     const ratio = aspectMode === '16:9' ? 16 / 9 : aspectMode === '4:3' ? 4 / 3 : null;
     const { width: cw, height: ch } = containerSize;
-    const baseStyle =
-      !ratio || cw === 0 || ch === 0
-        ? styles.videoBoxFull
-        : cw / ch > ratio
-        ? { width: ch * ratio, height: ch }
-        : { width: cw, height: cw / ratio };
-
-    return [
-      baseStyle,
-      userZoomScale !== 1.0 && { transform: [{ scale: userZoomScale }] },
-    ];
-  }, [aspectMode, containerSize, userZoomScale]);
+    if (!ratio || cw === 0 || ch === 0) return styles.videoBoxFull;
+    const containerRatio = cw / ch;
+    return containerRatio > ratio
+      ? { width: ch * ratio, height: ch }
+      : { width: cw, height: cw / ratio };
+  }, [aspectMode, containerSize]);
 
   const exoResizeMode = aspectMode === 'fit' ? 'contain' : aspectMode === 'zoom' ? 'cover' : 'stretch';
   const vlcResizeMode = aspectMode === 'fit' ? 'contain' : aspectMode === 'zoom' ? 'cover' : 'fill';
@@ -394,7 +410,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
         onVerticalSwipeEnd={handleVerticalSwipeEnd}
       >
         <View style={styles.videoStage} onLayout={handleContainerLayout} pointerEvents="none">
-        <View style={videoBoxStyle}>
+        <AnimatedReanimated.View style={[videoBoxStyle, animatedZoomStyle]}>
         {engine === 'vlc' ? (
           /* libVLC engine with software decoders (Dolby AC3/EAC3, DTS, TrueHD) used after a hardware decoder failure */
           <VLCPlayer
@@ -471,7 +487,7 @@ export const PlayerScreen: React.FC<PlayerScreenProps> = ({ asset, onClose }) =>
           repeat={false}
         />
         )}
-        </View>
+        </AnimatedReanimated.View>
         {/* In-App Brightness Dimming Tint (Hardware-accelerated, non-blocking) */}
         {brightness < 1.0 && (
           <View
